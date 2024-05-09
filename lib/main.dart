@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -65,6 +66,21 @@ class _MyHomePageState extends State<MyHomePage> {
   final urlController = TextEditingController();
   final keywordController = TextEditingController();
   Setting setting = Setting(url: "", keyword: "");
+  StreamSubscription? subscription;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Install the plugin if the settings are already saved.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (setting.url.isNotEmpty && setting.keyword.isNotEmpty) {
+        setState(() async {
+          await install(context);
+        });
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -92,6 +108,9 @@ class _MyHomePageState extends State<MyHomePage> {
             mainAxisAlignment: MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text(
+                "Status : ${subscription != null ? "Installed" : "Not Installed"}",
+              ),
               FilledButton(
                   onPressed: () async {
                     final status = await Permission.sms.status;
@@ -100,21 +119,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     final isGranted = await Permission.sms.request().isGranted;
                     print(isGranted);
 
-                    final plugin = Readsms();
-                    plugin.read();
-                    plugin.smsStream.listen((sms) async {
-                      print("${sms.sender} : ${sms.body}");
-
-                      if (!sms.body.contains(setting.keyword)) {
-                        return;
-                      }
-
-                      final dio = Dio();
-                      await dio.post(setting.url, data: {"text": sms.body});
-                    });
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("SMS Proxy installed!")));
+                    if (context.mounted) {
+                      install(context);
+                    }
                   },
                   child: const Text("Install")),
               const SizedBox(height: 64.0),
@@ -156,5 +163,29 @@ class _MyHomePageState extends State<MyHomePage> {
             ],
           ),
         ));
+  }
+
+  Future<void> install(BuildContext context) async {
+    final plugin = Readsms();
+    plugin.read();
+
+    if (subscription != null) {
+      await subscription?.cancel();
+    }
+    subscription = plugin.smsStream.listen((sms) async {
+      print("${sms.sender} : ${sms.body}");
+
+      if (!sms.body.contains(setting.keyword)) {
+        return;
+      }
+
+      final dio = Dio();
+      await dio.post(setting.url, data: {"text": sms.body});
+    });
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("SMS Proxy installed!")));
+    }
   }
 }
