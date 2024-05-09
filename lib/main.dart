@@ -228,7 +228,14 @@ class _MyHomePageState extends State<MyHomePage> {
               FilledButton(
                   onPressed: () async {
                     final isGranted = await Permission.sms.request().isGranted;
-                    print(isGranted);
+                    if (!isGranted) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text(
+                                "Please grant SMS permission to use this app!")));
+                      }
+                      return;
+                    }
 
                     if (context.mounted) {
                       await install(context);
@@ -252,7 +259,7 @@ class _MyHomePageState extends State<MyHomePage> {
               TextField(
                 controller: urlController,
                 decoration: const InputDecoration(
-                  hintText: "URL to Post",
+                  hintText: "Slack Webhook URL to Post",
                 ),
                 keyboardType: TextInputType.multiline,
                 maxLines: null,
