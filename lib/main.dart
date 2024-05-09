@@ -77,10 +77,13 @@ class _MyHomePageState extends State<MyHomePage> {
   final urlController = TextEditingController();
   final keywordController = TextEditingController();
   Setting setting = Setting(url: "", keyword: "");
-  StreamSubscription? subscription;
   ReceivePort? _receivePort;
+  bool isRunning = false;
 
   Future<bool> _startForegroundTask() async {
+    FlutterForegroundTask.saveData(key: "url", value: setting.url);
+    FlutterForegroundTask.saveData(key: "keyword", value: setting.keyword);
+
     // Register the receivePort before starting the service.
     final ReceivePort? receivePort = FlutterForegroundTask.receivePort;
     final bool isRegistered = _registerReceivePort(receivePort);
@@ -90,6 +93,12 @@ class _MyHomePageState extends State<MyHomePage> {
     }
 
     if (await FlutterForegroundTask.isRunningService) {
+      if (!isRunning) {
+        setState(() {
+          isRunning = true;
+        });
+      }
+
       return FlutterForegroundTask.restartService();
     } else {
       return FlutterForegroundTask.startService(
@@ -109,12 +118,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
     _receivePort = newReceivePort;
     _receivePort?.listen((data) async {
-      if (data is String) {
-        if (data.contains(setting.keyword)) {
-          final dio = Dio();
-          await dio.post(setting.url, data: {"text": data});
-        }
-      }
+      print("received: $data");
     });
 
     return _receivePort != null;
@@ -182,8 +186,12 @@ class _MyHomePageState extends State<MyHomePage> {
 
       // You can get the previous ReceivePort without restarting the service.
       if (await FlutterForegroundTask.isRunningService) {
-        final newReceivePort = FlutterForegroundTask.receivePort;
-        _registerReceivePort(newReceivePort);
+        print("Service is running.");
+        // final newReceivePort = FlutterForegroundTask.receivePort;
+        // _registerReceivePort(newReceivePort);
+        _startForegroundTask();
+      } else {
+        print("Service is not running.");
       }
     });
   }
@@ -215,13 +223,10 @@ class _MyHomePageState extends State<MyHomePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                "Status : ${subscription != null ? "Installed" : "Not Installed"}",
+                "Status : ${isRunning ? "Running" : "Not Running"}",
               ),
               FilledButton(
                   onPressed: () async {
-                    final status = await Permission.sms.status;
-                    print(status);
-
                     final isGranted = await Permission.sms.request().isGranted;
                     print(isGranted);
 
@@ -272,11 +277,16 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> install(BuildContext context) async {
+    await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+
     await _startForegroundTask();
 
     if (context.mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text("SMS Proxy installed!")));
+      setState(() {
+        isRunning = true;
+      });
     }
   }
 }
@@ -290,8 +300,22 @@ class SMSHandler extends TaskHandler {
     plugin.read();
 
     _streamSubscription = plugin.smsStream.listen((sms) async {
-      sendPort?.send(sms.body);
+      final url = await FlutterForegroundTask.getData<String>(key: 'url') ?? "";
+      final keyword =
+          await FlutterForegroundTask.getData<String>(key: 'keyword') ?? "";
+
+      if (url.isEmpty || keyword.isEmpty) {
+        return;
+      }
+
+      sendPort?.send("keyword: $keyword, url: $url");
+      if (sms.body.contains(keyword)) {
+        final dio = Dio();
+        await dio.post(url, data: {"text": sms.body});
+      }
     });
+
+    sendPort?.send("SMS Proxy is started!");
   }
 
   @override
